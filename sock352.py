@@ -3,6 +3,7 @@ import socket as syssock
 import struct
 import sys
 import random
+import math
 
 # these functions are global to the class and
 # define the UDP ports all messages are sent
@@ -41,20 +42,20 @@ class socket:
             print "Please run Sock352.init(UDPportTx, UDPportRx)"
         self.address = None
         self.backlog = 0
-        self.first_sequence_no = None
+        self.sequence_no = None
 
     def bind(self,address):
         newAddress = (address[0], int(address[1])) #Port sent in as str so convert it
         self.address = newAddress
         sock.bind(newAddress)
 
-    def get_header(self):
+    def get_con_header(self):
         flags = Flags.SYN
-        self.first_sequence_no = random.randint(0,9999)
+        self.sequence_no = random.randint(0,9999)
         ack_no = 0
         window = 20
         payload_len = 40
-        header = make_header(flags, self.first_sequence_no, ack_no, window, payload_len)
+        header = make_header(flags, self.sequence_no, ack_no, window, payload_len)
         return header
 
     def connect_handshake(self):
@@ -66,7 +67,7 @@ class socket:
                 break;
             except syssock.timeout:
                 tries += 1
-                sock.sendto(header, newAddress)
+                sock.sendto(header, self.address)
         if (tries == 20):
             return False
         (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(data)
@@ -76,7 +77,7 @@ class socket:
         return False
 
     def connect(self,address):
-        header = self.get_header()
+        header = self.get_con_header()
         self.address = (address[0], int(address[1])) 
         sock.sendto(header, self.address)
         return self.connect_handshake()
@@ -86,7 +87,7 @@ class socket:
 
     def accept(self):
         sock.setblocking(1)
-        (header, addr) = sock.recvfrom(1024)  # change this to your code 
+        (header, addr) = sock.recvfrom(1024)
         (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(header)
         self.sequence_no = random.randint(0,99999)
         replyHeader = make_header(Flags.SYN | Flags.ACK, self.sequence_no, sequence_no+1, window, 40) 
@@ -100,15 +101,31 @@ class socket:
 #-time outs
 #-handle whether somethings been acked
 #-receive acks 
+    def make_send_headers(self, num_packets, leftover):
+        headers = []
+        for x in range(1,num_packets+1):
+            self.sequence_no += 1
+            if (x != num_packets):
+                headers.append(make_header(0, self.sequence_no, 0, 0, 63960)) 
+            else:
+                headers.append(make_header(0, self.sequence_no, 0, 0, leftover)) 
     def send(self,buffer):
-        bytes_sent = 0     # fill in your code here 
-        # not sure what to do about self.sock, part of init
-        while bytes_sent < buffer:
-            sent = self.sock.send(msg[bytes_sent:])  
-            if sent == 0:
-                raise RuntimeError("socket connection broken")
-            bytes_sent = bytes_sent + sent
-
+        buffer_len = len(buffer)
+        number_packets = int(math.ceil(buffer_len/63960.0))
+        ack_arr = [-1] * number_packets
+        lowest_unacked = self.sequence_no
+        headers = self.make_send_headers(number_packets, (buffer_len % 63960))
+        window_size = 10
+        bytes_sent = 0
+        for i in range(number_packets):
+            data = headers[i]
+            if i != (number_packets - 1):
+                data += buffer[63960*i: 63960*(i+1)]
+                bytes_sent += 63960
+            else:
+                data += buffer[63960*i:]
+                bytes_sent += buffer_len % 63960
+            sock.sendto(data, self.address)
         return bytes_sent 
 
 #TODO
@@ -118,14 +135,12 @@ class socket:
 #-receive acks 
 #python struct unpack
     def recv(self,nbytes):
-        bytes_rec= 0     # fill in your code here
-        
-        chunks = []
-        
-        while bytes_rec < nbytes:
-            chunk = self.sock.recv(min(nbytes - bytes_recd, 2048))
-            if chunk == '':
-                raise RuntimeError("socket connection broken")
-            chunks.append(chunk)
-            bytes_rec = bytes_rec + len(chunk)
-        return ''.join(chunks)
+        bytes_rec = 0     # fill in your code here
+        buffer = ""
+        while (bytes_rec < nbytes):
+            toRead = math.min(64000, nbytes-bytes_rec+40)
+            (data, addr) = sock.recvfrom(toRead)
+            header = data[0:40]
+            body = data[40:]
+            buffer += body
+            bytes_rec += len(body)
