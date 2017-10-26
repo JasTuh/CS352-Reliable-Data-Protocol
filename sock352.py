@@ -80,8 +80,9 @@ class socket:
         header = self.get_con_header()
         self.address = (address[0], int(address[1])) 
         sock.sendto(header, self.address)
-        return self.connect_handshake()
-
+        if not self.connect_handshake():
+            raise Exception("Could not establish a connection with the server.")
+        return True 
     def listen(self,backlog):
         self.backlog = backlog
 
@@ -92,7 +93,7 @@ class socket:
         self.sequence_no = random.randint(0,99999)
         replyHeader = make_header(Flags.SYN | Flags.ACK, self.sequence_no, sequence_no+1, window, 40) 
         sock.sendto(replyHeader, addr)
-        return (sock, addr)
+        return (self, addr)
     def close(self):   # fill in your code here 
 #TODO TEAR DOWN
         return 
@@ -109,6 +110,7 @@ class socket:
                 headers.append(make_header(0, self.sequence_no, 0, 0, 63960)) 
             else:
                 headers.append(make_header(0, self.sequence_no, 0, 0, leftover)) 
+        return headers
     def send(self,buffer):
         buffer_len = len(buffer)
         number_packets = int(math.ceil(buffer_len/63960.0))
@@ -138,9 +140,12 @@ class socket:
         bytes_rec = 0     # fill in your code here
         buffer = ""
         while (bytes_rec < nbytes):
-            toRead = math.min(64000, nbytes-bytes_rec+40)
+            toRead = min(64000, nbytes-bytes_rec+40)
             (data, addr) = sock.recvfrom(toRead)
             header = data[0:40]
             body = data[40:]
             buffer += body
             bytes_rec += len(body)
+        print "heres the buffer"
+        print buffer
+        return buffer
