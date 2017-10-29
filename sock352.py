@@ -124,13 +124,14 @@ class socket:
         unacked = 0
         for i in range(number_packets):
             data = headers[i]
+            message = None
             if i != (number_packets - 1):
-                data += buffer[63960*i: 63960*(i+1)]
+                message = data + buffer[63960*i: 63960*(i+1)]
                 bytes_sent += 63960
             else:
-                data += buffer[63960*i:]
+                message = data + buffer[63960*i:]
                 bytes_sent += buffer_len % 63960
-            sock.sendto(data, self.address)
+            sock.sendto(message, self.address)
             while True:
                 try:
                     reply_header_bin = sock.recv(40) 
