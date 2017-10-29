@@ -27,7 +27,6 @@ def init(UDPportTx,UDPportsRx):   # initialize your UDP socket here
 
 def make_header(flags, sequence_no, ack_no, window, payload_len, checksum=0, version=0x1, protocol=0, opt_ptr=0, source_port = 0, dest_port=0):
     udpPkt_hdr_data = struct.Struct('!BBBBHHLLQQLL')
-    print (version, flags, opt_ptr, protocol, 40, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len)
     return udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, 40, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
 def unpack_header(header):
@@ -43,6 +42,7 @@ class socket:
         self.address = None
         self.backlog = 0
         self.sequence_no = None
+        self.expected_sequence_no = None
 
     def bind(self,address):
         newAddress = (address[0], int(address[1])) #Port sent in as str so convert it
@@ -58,7 +58,7 @@ class socket:
         header = make_header(flags, self.sequence_no, ack_no, window, payload_len)
         return header
 
-    def connect_handshake(self):
+    def connect_handshake(self, header):
         data = None
         tries = 0
         while tries < 20:
@@ -80,7 +80,7 @@ class socket:
         header = self.get_con_header()
         self.address = (address[0], int(address[1])) 
         sock.sendto(header, self.address)
-        if not self.connect_handshake():
+        if not self.connect_handshake(header):
             raise Exception("Could not establish a connection with the server.")
         return True 
     def listen(self,backlog):
@@ -92,6 +92,7 @@ class socket:
         (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(header)
         self.sequence_no = random.randint(0,99999)
         replyHeader = make_header(Flags.SYN | Flags.ACK, self.sequence_no, sequence_no+1, window, 40) 
+        self.expected_sequence_no = sequence_no + 1
         sock.sendto(replyHeader, addr)
         return (self, addr)
     def close(self):   # fill in your code here 
@@ -119,6 +120,7 @@ class socket:
         headers = self.make_send_headers(number_packets, (buffer_len % 63960))
         window_size = 10
         bytes_sent = 0
+        sock.setblocking(1)
         for i in range(number_packets):
             data = headers[i]
             if i != (number_packets - 1):
@@ -130,22 +132,22 @@ class socket:
             sock.sendto(data, self.address)
         return bytes_sent 
 
-#TODO
-#-window size
-#-time outs
-#-handle whether somethings been acked
-#-receive acks 
-#python struct unpack
+    def send_ack(self, seq_no, addr):
+        replyHeader = make_header(Flags.ACK, self.sequence_no, seq_no, 20, 40) 
+        sock.sendto(replyHeader, addr)
+
     def recv(self,nbytes):
         bytes_rec = 0     # fill in your code here
         buffer = ""
         while (bytes_rec < nbytes):
-            toRead = min(64000, nbytes-bytes_rec+40)
-            (data, addr) = sock.recvfrom(toRead)
-            header = data[0:40]
-            body = data[40:]
-            buffer += body
-            bytes_rec += len(body)
-        print "heres the buffer"
-        print buffer
+            (header, addr) = sock.recvfrom(40)
+            (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(header)
+            if (sequence_no != self.expected_sequence_no):
+                sock.recv(payload_len)
+                continue
+            self.expected_sequence_no += 1
+            (data, addr) = sock.recvfrom(payload_len)
+            buffer += data 
+            bytes_rec += payload_len
+            self.send_ack(self.expected_sequence_no, addr)
         return buffer
