@@ -55,9 +55,8 @@ class socket:
         flags = Flags.SYN
         self.sequence_no = random.randint(0,9999)
         ack_no = 0
-        window = 20
         payload_len = 40
-        header = make_header(flags, self.sequence_no, ack_no, window, payload_len)
+        header = make_header(flags, self.sequence_no, ack_no, 0, payload_len)
         return header
 
     def connect_handshake(self, header):
@@ -74,7 +73,6 @@ class socket:
             return False
         (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(data)
         if (flags == (Flags.SYN | Flags.ACK)):
-            print "Connection Established!"
             return True
         return False
 
@@ -98,52 +96,84 @@ class socket:
         sock.sendto(replyHeader, addr)
         return (self, addr)
     def close(self):   # fill in your code here 
-#TODO TEAR DOWN
-        closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 20, 40) 
+        closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 0, 40) 
         sock.sendto(closeHeader, self.address)
-        print "The connection has terminated"
         return 
-#TODO
-#-window size
-#-time outs
-#-handle whether somethings been acked
-#-receive acks 
     def make_send_headers(self, num_packets, leftover):
         headers = []
         for x in range(1,num_packets+1):
             self.sequence_no += 1
             if (x != num_packets):
-                headers.append(make_header(0, self.sequence_no, 0, 0, 63960)) 
+                headers.append((make_header(0, self.sequence_no, 0, 0, 63960), self.sequence_no+1)) 
             else:
-                headers.append(make_header(0, self.sequence_no, 0, 0, leftover)) 
+                headers.append((make_header(0, self.sequence_no, 0, 0, leftover), self.sequence_no + 1)) 
         return headers
-    def send(self,buffer):
-        buffer_len = len(buffer)
-        number_packets = int(math.ceil(buffer_len/63960.0))
-        lowest_unacked = self.sequence_no
-        headers = self.make_send_headers(number_packets, (buffer_len % 63960))
-        window_size = 10
-        bytes_sent = 0
-        unacked = 0
-        for i in range(number_packets):
-            data = headers[i]
+
+    def make_message_packets(self, headers, buffer, number_packets):
+        messages = []
+        for i in range(number_packets): #Construct all the packets we wish to send
+            data = headers[i][0]
             message = None
             if i != (number_packets - 1):
                 message = data + buffer[63960*i: 63960*(i+1)]
-                bytes_sent += 63960
             else:
                 message = data + buffer[63960*i:]
-                bytes_sent += buffer_len % 63960
-            sock.sendto(message, self.address)
-            while True:
-                try:
-                    reply_header_bin = sock.recv(40) 
-                    (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(reply_header_bin)
-                    if (ack_no == (self.sequence_no - number_packets + i + 2)):
-                        break
-                except syssock.timeout:
-                    sock.sendto(data, self.address)
-        return bytes_sent 
+            messages.append(message)
+        return messages
+
+    def resend_window(self, messages, messages_sent, lowest_unacked):
+        sock.sendto(messages[lowest_unacked], self.address)
+        if lowest_unacked + 1 < len(messages) and messages_sent[lowest_unacked + 1]:
+            sock.sendto(messages[lowest_unacked + 1], self.address)
+        if lowest_unacked + 2 < len(messages) and messages_sent[lowest_unacked + 2]:
+            sock.sendto(messages[lowest_unacked + 2], self.address)
+
+    def send(self,buffer):
+        #First we must construct the message packets to send
+        buffer_len = len(buffer)
+        number_packets = int(math.ceil(buffer_len/63960.0))
+        headers = self.make_send_headers(number_packets, (buffer_len % 63960))
+        messages = self.make_message_packets(headers, buffer, number_packets)
+        messages_sent = [False] * len(messages)
+        
+        #Now we must start to send the packets we constructed
+        bytes_sent= 0
+        unacked = 0
+        lowest_unacked = 0
+        window_size = 3 
+        for i in range(len(messages)):
+            sock.sendto(messages[i], self.address)
+            messages_sent[i] = True
+            unacked += 1
+            if unacked > window_size or i == len(messages) - 1:
+                while unacked != 0:
+                    try:
+                        reply_header_bin = sock.recv(40) 
+                        (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(reply_header_bin)
+                        if (ack_no == headers[lowest_unacked][1]):
+                            bytes_sent += 63960 if lowest_unacked < len(messages) - 1 else buffer_len % 63960
+                            lowest_unacked += 1
+                            unacked -= 1
+                            break
+                        else:
+                            self.resend_window(messages, messages_sent, lowest_unacked)
+                    except syssock.timeout:
+                        self.resend_window(messages, messages_sent,  lowest_unacked)
+                        
+        return bytes_sent
+
+        #    sock.sendto(message, self.address)
+        #    while True:
+        #        try:
+        #            reply_header_bin = sock.recv(40) 
+        #            (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(reply_header_bin)
+        #            if (ack_no == (self.sequence_no - number_packets + i + 2)):
+        #                break
+        #            else:
+        #                sock.sendto(data, self.address)
+        #        except syssock.timeout:
+        #            sock.sendto(data, self.address)
+        #return bytes_sent 
 
     def send_ack(self, seq_no, addr):
         replyHeader = make_header(Flags.ACK, self.sequence_no, seq_no, 20, 40) 
