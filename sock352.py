@@ -83,6 +83,7 @@ class socket:
         if not self.connect_handshake(header):
             raise Exception("Could not establish a connection with the server.")
         return True 
+
     def listen(self,backlog):
         self.backlog = backlog
 
@@ -95,6 +96,7 @@ class socket:
         self.expected_sequence_no = sequence_no + 1
         sock.sendto(replyHeader, addr)
         return (self, addr)
+
     def close(self):   # fill in your code here 
         closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 0, 40) 
         sock.sendto(closeHeader, self.address)
@@ -154,26 +156,12 @@ class socket:
                             bytes_sent += 63960 if lowest_unacked < len(messages) - 1 else buffer_len % 63960
                             lowest_unacked += 1
                             unacked -= 1
-                            break
                         else:
                             self.resend_window(messages, messages_sent, lowest_unacked)
                     except syssock.timeout:
                         self.resend_window(messages, messages_sent,  lowest_unacked)
                         
         return bytes_sent
-
-        #    sock.sendto(message, self.address)
-        #    while True:
-        #        try:
-        #            reply_header_bin = sock.recv(40) 
-        #            (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(reply_header_bin)
-        #            if (ack_no == (self.sequence_no - number_packets + i + 2)):
-        #                break
-        #            else:
-        #                sock.sendto(data, self.address)
-        #        except syssock.timeout:
-        #            sock.sendto(data, self.address)
-        #return bytes_sent 
 
     def send_ack(self, seq_no, addr):
         replyHeader = make_header(Flags.ACK, self.sequence_no, seq_no, 20, 40) 
