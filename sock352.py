@@ -99,6 +99,9 @@ class socket:
         return (self, addr)
     def close(self):   # fill in your code here 
 #TODO TEAR DOWN
+        closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 20, 40) 
+        sock.sendto(closeHeader, self.address)
+        print "The connection has terminated"
         return 
 #TODO
 #-window size
