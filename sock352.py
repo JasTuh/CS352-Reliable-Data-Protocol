@@ -44,6 +44,7 @@ class socket:
         self.sequence_no = None
         self.expected_sequence_no = None
         self.info_remaining = 0
+        self.internal_buffer = None
 
     def bind(self,address):
         newAddress = (address[0], int(address[1])) #Port sent in as str so convert it
@@ -115,7 +116,6 @@ class socket:
         return headers
     def send(self,buffer):
         buffer_len = len(buffer)
-        print "buffer_len = %d " %buffer_len
         number_packets = int(math.ceil(buffer_len/63960.0))
         lowest_unacked = self.sequence_no
         headers = self.make_send_headers(number_packets, (buffer_len % 63960))
@@ -156,16 +156,15 @@ class socket:
             bytes_rec += toRead
             self.info_remaining -= toRead
         while (bytes_rec < nbytes):
-            (header, addr) = sock.recvfrom(40)
-            (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(header)
+            (recvBuf, addr) = sock.recvfrom(16384)
+            (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(recvBuf[:40])
             if (sequence_no != self.expected_sequence_no):
-                sock.recv(payload_len)
                 continue
             self.expected_sequence_no += 1
-            (data, addr) = sock.recvfrom(min(nbytes,payload_len))
             if (nbytes < payload_len):
                 self.info_remaining = payload_len - nbytes
-            buffer += data 
+                self.internal_buffer = recvBuf[nbytes:payload_len]
+            buffer += recvBuf[40:40+min(nbytes,payload_len)]
             bytes_rec += min(payload_len, nbytes)
             self.send_ack(self.expected_sequence_no, addr)
         return buffer
