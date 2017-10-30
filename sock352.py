@@ -151,10 +151,11 @@ class socket:
         buffer = ""
         if (self.info_remaining > 0):
             toRead = min(self.info_remaining, nbytes)
-            buffer += sock.recv(toRead)
+            buffer += self.internal_buffer[:toRead] 
             nbytes -= toRead
             bytes_rec += toRead
             self.info_remaining -= toRead
+            self.internal_buffer = self.internal_buffer[toRead:]
         while (bytes_rec < nbytes):
             (recvBuf, addr) = sock.recvfrom(16384)
             (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(recvBuf[:40])
