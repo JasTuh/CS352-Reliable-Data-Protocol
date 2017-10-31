@@ -196,6 +196,14 @@ class socket:
             (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(recvBuf[:40])
             if (sequence_no != self.expected_sequence_no):
                 continue
+            if(flags ==Flags.FIN):
+                closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 0, 40) 
+                sock.sendto(closeHeader, addr)
+                return None 
+            if not recvBuf:
+                resetHeader = make_header(Flags.reset, self.sequence_no, 0, 0, 40) 
+                sock.sendto(resetHeader, addr)
+                
             self.expected_sequence_no += 1
             if (nbytes < payload_len):
                 self.info_remaining = payload_len - nbytes
