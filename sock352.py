@@ -36,7 +36,6 @@ def unpack_header(header):
 
 class socket:
     def __init__(self):
-#TODO discuss fields we need in our class so it doesn't become a mess 
         if not sock:
             print "Please run Sock352.init(UDPportTx, UDPportRx)"
         self.address = None
@@ -51,6 +50,9 @@ class socket:
         self.address = newAddress
         sock.bind(newAddress)
 
+    '''
+    get_con_header returns a correctly formatted header for initiating connections
+    '''
     def get_con_header(self):
         flags = Flags.SYN
         self.sequence_no = random.randint(0,9999)
@@ -59,6 +61,12 @@ class socket:
         header = make_header(flags, self.sequence_no, ack_no, 0, payload_len)
         return header
 
+    '''
+    connect_handshake tries to receive a response from the server
+    in regards to the connection request that was sent.
+    It will try to connect to the server up to 20 times and if it succeeds
+    it will return true otherwise it will return false
+    '''
     def connect_handshake(self, header):
         data = None
         tries = 0
@@ -97,10 +105,16 @@ class socket:
         sock.sendto(replyHeader, addr)
         return (self, addr)
 
-    def close(self):   # fill in your code here 
+    def close(self):
         closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 0, 40) 
         sock.sendto(closeHeader, self.address)
         return 
+    
+    '''
+    make_send_headers takes in the amount of packets to be sent, and the amount of data 
+    in the last packet since that may be less than the max UDP packet size and returns a list
+    containing tuples which are of the form (header for the nth packet, expected return sequence no)
+    '''
     def make_send_headers(self, num_packets, leftover):
         headers = []
         for x in range(1,num_packets+1):
