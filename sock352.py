@@ -25,8 +25,8 @@ global privateKeys
 
 # the encryption flag 
 #not sure why 236, represents 0xEC
-global ENCRYPT = 236
-
+global ENCRYPT
+ENCRYPT = 236
 
 publicKeysHex = {} 
 privateKeysHex = {} 
@@ -154,11 +154,11 @@ class socket:
                 self.encrypt = True
         if(self.encrypt):
             private_server_K = PrivateKey[(self.address[0],self.address[1])]
-            public_server_K  = PublicKey(self.address[0],self.address[1])]
+            public_server_K  = PublicKey[(self.address[0],self.address[1])]
             
             #not sure if this is how to get the client keys, also may need to check UDPportR if UDPportT is empty
-            public_client_k = PublicKey(UDPportT,self.address[1])]
-            private_client_k = PrivateKey(UDPportT,self.address[1])]
+            public_client_k = PublicKey[(UDPportT,self.address[1])]
+            private_client_k = PrivateKey[(UDPportT,self.address[1])]
             if not private_client_k:
                 raise Exception("No private key found for the host and port number")
 
