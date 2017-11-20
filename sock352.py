@@ -235,8 +235,7 @@ class socket:
     #
     # @param none
     # @return a new socket object which the server uses to communicate to the client
-    def accept(self):
-
+    def accept(self, *args):
         if not self.is_listening or not global_socket:
             return
 
@@ -245,9 +244,20 @@ class socket:
         # Check backlog for pending connection requests
         this_connection = self.backlogged_connections.get()
         if this_connection is None:
-            return
+            return       
 
         self.accepted_connection = this_connection[0]
+        if len(args) > 0:
+            if args[0] == ENCRYPT:
+                self.encrypt = True
+                privateKey = privateKeys[("*", "*")]
+                publicKey = publicKeys[(self.accepted_connection[0],self.accepted_connection[1])]
+                if privateKey == None or publicKey == None:
+                    print "Could not locate appropriate public and private keys."
+                self.box = Box(privateKey, publicKey)
+ 
+
+
         sequence_no = randint(0, 1000)
         ack_no = this_connection[1]
 
@@ -389,7 +399,8 @@ class socket:
             self.recv_ack_no.append(sequence_no)
 
         data_to_return = data[HEADER_SIZE:]
-
+        if (syn_pack[ATTRIBUTES['options']] == 1):
+            data_to_return = this.box.decrypt(data_to_return)
         ack_no = sequence_no
 
         syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, 0, 0, HEADER_SIZE, 0, 0, 0, ack_no, 0, 0, 0)
