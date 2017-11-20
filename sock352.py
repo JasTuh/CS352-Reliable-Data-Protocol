@@ -316,8 +316,10 @@ class socket:
             return
 
         new_data_to_send = buffer[:4000]
-        nonce = nacl.utils.random(Box.NONCE_SIZE)
-        encrypted_payload = socket_box.encrypt(new_data_to_send, nonce)
+        if self.encrypt:
+            nonce = nacl.utils.random(Box.NONCE_SIZE)
+            new_data_to_send = self.box.encrypt(new_data_to_send, nonce)
+            
         self.start_seq_no += 1
 
         while True:
@@ -325,10 +327,10 @@ class socket:
             data, sender = None, (None, None)
             sending_packet_type = struct.Struct("!BBBBHHLLQQLL")
             options = 1 if self.encrypt else 0
-            syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, options, 0, HEADER_SIZE, 0, 0, 0, self.start_seq_no, 0, 0, len(encrypted_payload))
+            syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, options, 0, HEADER_SIZE, 0, 0, 0, self.start_seq_no, 0, 0, len(new_data_to_send))
 
             # Append buffer data to our byte struct
-            syn_pack += encrypted_payload
+            syn_pack += new_data_to_send 
 
             bytessent = global_socket.sendto(syn_pack, (self.destination_hostname, self.destination_port))
 
@@ -399,7 +401,7 @@ class socket:
             self.recv_ack_no.append(sequence_no)
 
         data_to_return = data[HEADER_SIZE:]
-        if (syn_pack[ATTRIBUTES['options']] == 1):
+        if (syn_pack[ATTRIBUTES['option']] == 1):
             data_to_return = this.box.decrypt(data_to_return)
         ack_no = sequence_no
 
