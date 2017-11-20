@@ -8,6 +8,30 @@ import math
 # these functions are global to the class and
 # define the UDP ports all messages are sent
 # and received from
+# encryption libraries 
+import nacl.utils
+import nacl.secret
+import nacl.utils
+from nacl.public import PrivateKey, Box
+
+
+# the public and private keychains in hex format 
+global publicKeysHex
+global privateKeysHex
+
+# the public and private keychains in binary format 
+global publicKeys
+global privateKeys
+
+# the encryption flag 
+#not sure why 236, represents 0xEC
+global ENCRYPT = 236
+
+
+publicKeysHex = {} 
+privateKeysHex = {} 
+publicKeys = {} 
+privateKeys = {}
 
 sock = None
 UDPportT = None
@@ -24,6 +48,38 @@ def init(UDPportTx,UDPportsRx):   # initialize your UDP socket here
     UDPportR = int(UDPportsRx)
     sock = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
     sock.settimeout(0.2)
+
+def readKeyChain(filename):
+    global publicKeysHex
+    global privateKeysHex 
+    global publicKeys
+    global privateKeys 
+    
+    if (filename):
+        try:
+            keyfile_fd = open(filename,"r")
+            for line in keyfile_fd:
+                words = line.split()
+                # check if a comment
+                # more than 2 words, and the first word does not have a
+                # hash, we may have a valid host/key pair in the keychain
+                if ( (len(words) >= 4) and (words[0].find("#") == -1)):
+                    host = words[1]
+                    port = words[2]
+                    keyInHex = words[3]
+                    if (words[0] == "private"):
+                        privateKeysHex[(host,port)] = keyInHex
+                        privateKeys[(host,port)] = nacl.public.PrivateKey(keyInHex, nacl.encoding.HexEncoder)
+                    elif (words[0] == "public"):
+                        publicKeysHex[(host,port)] = keyInHex
+                        publicKeys[(host,port)] = nacl.public.PublicKey(keyInHex, nacl.encoding.HexEncoder)
+        except Exception,e:
+            print ( "error: opening keychain file: %s %s" % (filename,repr(e)))
+    else:
+            print ("error: No filename presented")             
+
+    return (publicKeys,privateKeys)
+
 
 def make_header(flags, sequence_no, ack_no, window, payload_len, checksum=0, version=0x1, protocol=0, opt_ptr=0, source_port = 0, dest_port=0):
     udpPkt_hdr_data = struct.Struct('!BBBBHHLLQQLL')
@@ -44,6 +100,9 @@ class socket:
         self.expected_sequence_no = None
         self.info_remaining = 0
         self.internal_buffer = None
+        self.encrypt = False
+        self.encryption = False
+
 
     def bind(self,address):
         newAddress = (address[0], int(address[1])) #Port sent in as str so convert it
@@ -68,6 +127,7 @@ class socket:
     it will return true otherwise it will return false
     '''
     def connect_handshake(self, header):
+        #if sending encrypted header, should it decrpyt first?
         data = None
         tries = 0
         while tries < 20:
@@ -84,9 +144,36 @@ class socket:
             return True
         return False
 
-    def connect(self,address):
+    def connect(self,*args):
         header = self.get_con_header()
-        self.address = (address[0], int(address[1])) 
+        if (len(args) >= 1): 
+            #not quite sure if this correctly gets the host and port num
+            self.address = (args[0][0], int(args[0][1])) 
+        if (len(args) >= 2):
+            if (args[1] == ENCRYPT):
+                self.encrypt = True
+        if(self.encrypt):
+            private_server_K = PrivateKey[(self.address[0],self.address[1])]
+            public_server_K  = PublicKey(self.address[0],self.address[1])]
+            
+            #not sure if this is how to get the client keys, also may need to check UDPportR if UDPportT is empty
+            public_client_k = PublicKey(UDPportT,self.address[1])]
+            private_client_k = PrivateKey(UDPportT,self.address[1])]
+            if not private_client_k:
+                raise Exception("No private key found for the host and port number")
+
+            if not public_serverK:
+                raise Exception("No public key found for the host and port number")
+            socket_box = Box(private_client_k, public_server_K)
+            nonce = nacl.utils.random(Box.NONCE_SIZE) 
+
+            encrypted_payload= socket_box.encrypt(header, nonce)
+            
+            sock.sendto(encrypted_payload, self.address)
+            if not self.connect_handshake(header):
+                raise Exception("Could not establish a connection with the server.")
+            return True
+
         sock.sendto(header, self.address)
         if not self.connect_handshake(header):
             raise Exception("Could not establish a connection with the server.")
@@ -95,7 +182,15 @@ class socket:
     def listen(self,backlog):
         self.backlog = backlog
 
-    def accept(self):
+    #check if its encrypted or not
+    def accept(self,*args):
+        global ENCRYPT
+        if (len(args) >= 1):
+            if (args[0] == ENCRYPT):
+                self.encryption = True
+
+        if(self.encryption):
+            plaintext = sock_box.decrypt(encrypted_payload)
         sock.setblocking(1)
         (header, addr) = sock.recvfrom(1024)
         (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(header)
