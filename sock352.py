@@ -5,6 +5,11 @@ import socket as syssock
 import struct
 import sys
 
+import nacl.utils
+import nacl.secret
+import nacl.utils
+from nacl.public import PrivateKey, Box
+
 import time
 from Queue import *
 from random import *
@@ -24,7 +29,25 @@ RECV_SIZE = 4096
 WINDOW_SIZE = 5
 TIMEOUT = .2
 
-ATTRIBUTES = {'version': 0, 'flags': 1, 'header_len': 4, 'sequence_no': 8, 'ack_no': 9, 'payload_len': 11}
+global publicKeysHex
+global privateKeysHex
+
+# the public and private keychains in binary format 
+global publicKeys
+global privateKeys
+
+# the encryption flag 
+global ENCRYPT
+
+publicKeysHex = {} 
+privateKeysHex = {} 
+publicKeys = {} 
+privateKeys = {}
+
+# this is 0xEC 
+ENCRYPT = 236 
+
+ATTRIBUTES = {'version': 0, 'flags': 1,'option':2, 'header_len': 4, 'sequence_no': 8, 'ack_no': 9, 'payload_len': 11}
 
 # these functions are global to the class and
 # define the UDP ports all messages are sent
@@ -53,6 +76,39 @@ def init(UDPportTx,UDPportRx):
 
     global_socket.bind(('', recv_port))
 
+# read the keyfile. The result should be a private key and a keychain of
+# public keys
+def readKeyChain(filename):
+    global publicKeysHex
+    global privateKeysHex 
+    global publicKeys
+    global privateKeys 
+    
+    if (filename):
+        try:
+            keyfile_fd = open(filename,"r")
+            for line in keyfile_fd:
+                words = line.split()
+                # check if a comment
+                # more than 2 words, and the first word does not have a
+                # hash, we may have a valid host/key pair in the keychain
+                if ( (len(words) >= 4) and (words[0].find("#") == -1)):
+                    host = words[1]
+                    port = words[2]
+                    keyInHex = words[3]
+                    if (words[0] == "private"):
+                        privateKeysHex[(host,port)] = keyInHex
+                        privateKeys[(host,port)] = nacl.public.PrivateKey(keyInHex, nacl.encoding.HexEncoder)
+                    elif (words[0] == "public"):
+                        publicKeysHex[(host,port)] = keyInHex
+                        publicKeys[(host,port)] = nacl.public.PublicKey(keyInHex, nacl.encoding.HexEncoder)
+        except Exception,e:
+            print ( "error: opening keychain file: %s %s" % (filename,repr(e)))
+    else:
+            print ("error: No filename presented")             
+
+    return (publicKeys,privateKeys)
+
 # This is the class which are sending back to the client and server.
 class socket:
 
@@ -73,6 +129,8 @@ class socket:
         self.start_seq_no = 0
         self.resending_flag = False
         self.previous_seq_no = 0
+        self.encrypt = False
+        self.box = None
 
         self.binding_address = ''
         self.binding_port = recv_port
@@ -91,17 +149,28 @@ class socket:
     #
     # @param address is a tuple, [0] is the address we wish to connect to and [1] is the port number we want to connect to
     # @return none
-    def connect(self,address):
-
+    def connect(self,address, *args):
+        if len(args) > 0:
+            if args[0] == ENCRYPT:
+                self.encrypt = True
+                privateKey = privateKeys[("*", "*")]
+                publicKey = publicKeys[(address[0], send_port)]
+                if privateKey == None or publicKey == None:
+                    print "Could not locate appropriate public and private keys."
+                self.box = Box(privateKey, publicKey)
+                 
+ 
         # Make sure self is open and global socket is initialized
         if self.socket_open or not global_socket:
             return
-
+            
         data, sender = (None, (None, None))
         self.destination_hostname = address[0]
         self.destination_port = send_port
-
-        syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, SYN, 0, 0, HEADER_SIZE, 0, 0, 0, 0, 0, 0, 0)
+        options = 0
+        if self.encrypt:
+            options = 1
+        syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, SYN, options, 0, HEADER_SIZE, 0, 0, 0, 0, 0, 0, 0)
 
         # Now we wait for a response back from the user
         while True:
@@ -237,17 +306,19 @@ class socket:
             return
 
         new_data_to_send = buffer[:4000]
-
+        nonce = nacl.utils.random(Box.NONCE_SIZE)
+        encrypted_payload = socket_box.encrypt(new_data_to_send, nonce)
         self.start_seq_no += 1
 
         while True:
 
             data, sender = None, (None, None)
             sending_packet_type = struct.Struct("!BBBBHHLLQQLL")
-            syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, 0, 0, HEADER_SIZE, 0, 0, 0, self.start_seq_no, 0, 0, len(new_data_to_send))
+            options = 1 if self.encrypt else 0
+            syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, options, 0, HEADER_SIZE, 0, 0, 0, self.start_seq_no, 0, 0, len(encrypted_payload))
 
             # Append buffer data to our byte struct
-            syn_pack += new_data_to_send
+            syn_pack += encrypted_payload
 
             bytessent = global_socket.sendto(syn_pack, (self.destination_hostname, self.destination_port))
 
