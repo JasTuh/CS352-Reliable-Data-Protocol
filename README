@@ -1,0 +1,7 @@
+Jason Tuhy and Thomas Kaukonen
+
+Note: To find the private key for both the client and server we look for the following patterns:
+
+* * 
+localhost recv_port
+'' recv_port

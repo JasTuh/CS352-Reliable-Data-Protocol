@@ -153,7 +153,13 @@ class socket:
         if len(args) > 0:
             if args[0] == ENCRYPT:
                 self.encrypt = True
-                privateKey = privateKeys[("*", "*")]
+                privateKey = None
+                if ("*", "*") in privateKeys:
+                    privateKey = privateKeys[("*", "*")]
+                elif ("localhost", str(recv_port)) in privateKeys:
+                    privateKey = privateKeys[("localhost", str(recv_port))]
+                elif ("", str(recv_port)) in privateKeys:
+                    privateKey = privateKeys[("", str(recv_port))]
                 publicKey = publicKeys[(address[0], str(send_port))]
                 if privateKey == None or publicKey == None:
                     print "Could not locate appropriate public and private keys."
@@ -250,9 +256,14 @@ class socket:
         if len(args) > 0:
             if args[0] == ENCRYPT:
                 self.encrypt = True
-                privateKey = privateKeys[("*", "*")]
+                privateKey = None
+                if ("*", "*") in privateKeys:
+                    privateKey = privateKeys[("*", "*")]
+                elif ("localhost", str(recv_port)) in privateKeys:
+                    privateKey = privateKeys[("localhost", str(recv_port))]
+                elif ("", str(recv_port)) in privateKeys:
+                    privateKey = privateKeys[("", str(recv_port))]
                 publicKey = publicKeys[(self.accepted_connection[0],str(self.accepted_connection[1]))]
-
                 if privateKey == None or publicKey == None:
                     print "Could not locate appropriate public and private keys."
                 self.box = Box(privateKey, publicKey)
