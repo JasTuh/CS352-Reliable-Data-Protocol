@@ -154,7 +154,6 @@ class socket:
             if args[0] == ENCRYPT:
                 self.encrypt = True
                 privateKey = privateKeys[("*", "*")]
-                print publicKeys
                 publicKey = publicKeys[(address[0], str(send_port))]
                 if privateKey == None or publicKey == None:
                     print "Could not locate appropriate public and private keys."
@@ -252,15 +251,11 @@ class socket:
             if args[0] == ENCRYPT:
                 self.encrypt = True
                 privateKey = privateKeys[("*", "*")]
-                print publicKeys
                 publicKey = publicKeys[(self.accepted_connection[0],str(self.accepted_connection[1]))]
 
                 if privateKey == None or publicKey == None:
                     print "Could not locate appropriate public and private keys."
                 self.box = Box(privateKey, publicKey)
-                print "made box"
-        else:
-            print "did not make box"
  
 
 
