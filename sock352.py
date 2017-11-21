@@ -154,7 +154,8 @@ class socket:
             if args[0] == ENCRYPT:
                 self.encrypt = True
                 privateKey = privateKeys[("*", "*")]
-                publicKey = publicKeys[(address[0], send_port)]
+                print publicKeys
+                publicKey = publicKeys[(address[0], str(send_port))]
                 if privateKey == None or publicKey == None:
                     print "Could not locate appropriate public and private keys."
                 self.box = Box(privateKey, publicKey)
@@ -251,10 +252,15 @@ class socket:
             if args[0] == ENCRYPT:
                 self.encrypt = True
                 privateKey = privateKeys[("*", "*")]
-                publicKey = publicKeys[(self.accepted_connection[0],self.accepted_connection[1])]
+                print publicKeys
+                publicKey = publicKeys[(self.accepted_connection[0],str(self.accepted_connection[1]))]
+
                 if privateKey == None or publicKey == None:
                     print "Could not locate appropriate public and private keys."
                 self.box = Box(privateKey, publicKey)
+                print "made box"
+        else:
+            print "did not make box"
  
 
 
@@ -270,6 +276,8 @@ class socket:
         return_socket.socket_open = True
         return_socket.destination_hostname = self.accepted_connection[0]
         return_socket.destination_port = self.accepted_connection[1]
+        return_socket.box = self.box
+        return_socket.encrypt = True
         address = (self.accepted_connection[0], self.accepted_connection[1])
 
         return (return_socket, address)
@@ -360,7 +368,10 @@ class socket:
             if ack_no == self.start_seq_no:
                 break
 
-        return len(new_data_to_send)
+        length_sent = len(new_data_to_send)
+        if self.encrypt:
+            length_sent -= 40
+        return length_sent
 
     # The method which we use to handle receiving packets and directing them which come into the underlying UDP socket.
     #
@@ -402,7 +413,7 @@ class socket:
 
         data_to_return = data[HEADER_SIZE:]
         if (syn_pack[ATTRIBUTES['option']] == 1):
-            data_to_return = this.box.decrypt(data_to_return)
+            data_to_return = self.box.decrypt(data_to_return)
         ack_no = sequence_no
 
         syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, 0, 0, HEADER_SIZE, 0, 0, 0, ack_no, 0, 0, 0)
