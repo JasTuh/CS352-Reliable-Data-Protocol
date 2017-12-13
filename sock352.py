@@ -1,333 +1,223 @@
-#RIGHT CODE
-
 import binascii
 import socket as syssock
 import struct
 import sys
-
-import time
-from Queue import *
-from random import *
-
-PROTOCOL_VERSION = 1
-
-SYN = 0x01
-FIN = 0x02
-ACK = 0x04
-RESET = 0x08
-HAS_OPT = 0xA0
-
-HEADER_PKT_FORMAT = "!BBBBHHLLQQLL"
-STRUCT_TYPE = struct.Struct(HEADER_PKT_FORMAT)
-HEADER_SIZE = 40
-RECV_SIZE = 4096
-WINDOW_SIZE = 5
-TIMEOUT = .2
-
-ATTRIBUTES = {'version': 0, 'flags': 1, 'header_len': 4, 'sequence_no': 8, 'ack_no': 9, 'payload_len': 11}
+import random
+import math
 
 # these functions are global to the class and
 # define the UDP ports all messages are sent
 # and received from
 
-# We initialize our underlying UDP socket here to be used in the rest of the program.
-#
-# @param two ports, the first being a transmitting and the second being a receiving port, for this project, they are not being used
-# @return none
-def init(UDPportTx,UDPportRx):
+sock = None
+UDPportT = None
+UDPportR = None
 
-    global global_socket
-    global send_port
-    global recv_port
+class Flags:
+    SYN, FIN, ACK, RESET, HAS_OPT = [0x01, 0x02, 0x04, 0x08, 0xA0]
 
-    global_socket = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
+def init(UDPportTx,UDPportsRx):   # initialize your UDP socket here 
+    global UDPportT
+    global UDPportR 
+    global sock
+    UDPportT = int(UDPportTx)
+    UDPportR = int(UDPportsRx)
+    sock = syssock.socket(syssock.AF_INET, syssock.SOCK_DGRAM)
+    sock.settimeout(0.2)
 
-    send_port = int(UDPportTx)
-    recv_port = int(UDPportRx)
+def make_header(flags, sequence_no, ack_no, window, payload_len, checksum=0, version=0x1, protocol=0, opt_ptr=0, source_port = 0, dest_port=0):
+    udpPkt_hdr_data = struct.Struct('!BBBBHHLLQQLL')
+    return udpPkt_hdr_data.pack(version, flags, opt_ptr, protocol, 40, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len)
 
-    if send_port < 1 or send_port > 65535:
-        send_port = 27182
+def unpack_header(header):
+    udpPkt_hdr_data = struct.Struct('!BBBBHHLLQQLL')
+    return udpPkt_hdr_data.unpack(header)
 
-    if recv_port < 1 or recv_port > 65535:
-        recv_port = 27182
 
-    global_socket.bind(('', recv_port))
-
-# This is the class which are sending back to the client and server.
 class socket:
+    def __init__(self):
+        if not sock:
+            print "Please run Sock352.init(UDPportTx, UDPportRx)"
+        self.address = None
+        self.backlog = 0
+        self.sequence_no = None
+        self.expected_sequence_no = None
+        self.info_remaining = 0
+        self.internal_buffer = None
 
-    # Checks to see if the socket has been initialized and then defines the fields
-    #
-    # @param None
-    # @param None
-    def __init__(self):  # fill in your code here
-
-        self.socket_open = False
-        self.is_listening = False
-        self.destination_hostname = None
-        self.destination_port = None
-        self.backlogged_connections = None
-        self.outbound_queue = Queue(maxsize=WINDOW_SIZE)
-        self.recv_ack_no = []
-        self.sent_ack_no = []
-        self.start_seq_no = 0
-        self.resending_flag = False
-        self.previous_seq_no = 0
-
-        self.binding_address = ''
-        self.binding_port = recv_port
-
-        return
-
-    # This binds the underlying UDP socket.
-    #
-    # @param address of the binding, we accept a tuple which [0] has the address, [1] has the
-    # @return none
     def bind(self,address):
-        # NULL for Part 1
-        return
+        newAddress = (address[0], int(address[1])) #Port sent in as str so convert it
+        self.address = newAddress
+        sock.bind(newAddress)
 
-    # This initiates the Two-Way handshaking system of our protocol.
-    #
-    # @param address is a tuple, [0] is the address we wish to connect to and [1] is the port number we want to connect to
-    # @return none
+    '''
+    get_con_header returns a correctly formatted header for initiating connections
+    '''
+    def get_con_header(self):
+        flags = Flags.SYN
+        self.sequence_no = random.randint(0,9999)
+        ack_no = 0
+        payload_len = 40
+        header = make_header(flags, self.sequence_no, ack_no, 0, payload_len)
+        return header
+
+    '''
+    connect_handshake tries to receive a response from the server
+    in regards to the connection request that was sent.
+    It will try to connect to the server up to 20 times and if it succeeds
+    it will return true otherwise it will return false
+    '''
+    def connect_handshake(self, header):
+        data = None
+        tries = 0
+        while tries < 20:
+            try: 
+                data = sock.recv(1024)
+                break;
+            except syssock.timeout:
+                tries += 1
+                sock.sendto(header, self.address)
+        if (tries == 20):
+            return False
+        (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(data)
+        if (flags == (Flags.SYN | Flags.ACK)):
+            return True
+        return False
+
     def connect(self,address):
+        header = self.get_con_header()
+        self.address = (address[0], int(address[1])) 
+        sock.sendto(header, self.address)
+        if not self.connect_handshake(header):
+            raise Exception("Could not establish a connection with the server.")
+        return True 
 
-        # Make sure self is open and global socket is initialized
-        if self.socket_open or not global_socket:
-            return
-
-        data, sender = (None, (None, None))
-        self.destination_hostname = address[0]
-        self.destination_port = send_port
-
-        syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, SYN, 0, 0, HEADER_SIZE, 0, 0, 0, 0, 0, 0, 0)
-
-        # Now we wait for a response back from the user
-        while True:
-            
-            # We resend the packet if we have a timeout
-            global_socket.sendto(syn_pack, (self.destination_hostname, self.destination_port))
-
-            try:
-                global_socket.settimeout(TIMEOUT)
-                data, sender = global_socket.recvfrom(RECV_SIZE)
-                # We received an ACK
-                break
-            except syssock.timeout:
-                continue
-            finally:
-                global_socket.settimeout(None)
-
-        syn_pack = STRUCT_TYPE.unpack(data)
-
-        self.socket_open = True
-
-        return
-
-    # Calls receive on the underlying UDP socket and waits for a connection request from the client.
-    #
-    # @param backlog which is the number of connections we wish to queue. We do not worry about that for this assignment
-    # @return none
     def listen(self,backlog):
+        self.backlog = backlog
 
-        if not global_socket:
-            return
-
-        data, sender = (None, (None, None))
-        self.is_listening = True
-        self.backlogged_connections = Queue(maxsize=backlog)
-
-        # Receive data from global socket
-        while True:
-            try:
-                global_socket.settimeout(TIMEOUT)
-                data, sender = global_socket.recvfrom(HEADER_SIZE)
-            except syssock.timeout:
-                continue
-            finally:
-                global_socket.settimeout(None)
-
-            # Check the packet received
-            syn_pack = STRUCT_TYPE.unpack(data)
-            sender_address = sender[0]
-            sender_port = sender[1]
-            sender_seqno = syn_pack[8]
-
-            # We know that this is a connection request. Add to queue
-            if syn_pack[1] == SYN:
-                self.backlogged_connections.put((sender, sender_seqno))
-
-            break
-
-        return
-
-    # We dequeue the first connection we received then we send them a connection accept message and return a new socket object to the server
-    #
-    # @param none
-    # @return a new socket object which the server uses to communicate to the client
     def accept(self):
+        sock.setblocking(1)
+        (header, addr) = sock.recvfrom(1024)
+        (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(header)
+        self.sequence_no = random.randint(0,99999)
+        replyHeader = make_header(Flags.SYN | Flags.ACK, self.sequence_no, sequence_no+1, window, 40) 
+        self.expected_sequence_no = sequence_no + 1
+        sock.sendto(replyHeader, addr)
+        return (self, addr)
 
-        if not self.is_listening or not global_socket:
-            return
+    def close(self):
+        closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 0, 40) 
+        sock.sendto(closeHeader, self.address)
+        return 
+    
+    '''
+    make_send_headers takes in the amount of packets to be sent, and the amount of data 
+    in the last packet since that may be less than the max UDP packet size and returns a list
+    containing tuples which are of the form (header for the nth packet, expected return sequence no)
+    '''
+    def make_send_headers(self, num_packets, leftover):
+        headers = []
+        for x in range(1,num_packets+1):
+            self.sequence_no += 1
+            if (x != num_packets):
+                headers.append((make_header(0, self.sequence_no, 0, 0, 30000), self.sequence_no+1)) 
+            else:
+                headers.append((make_header(0, self.sequence_no, 0, 0, leftover), self.sequence_no + 1)) 
+        return headers
 
-        # Now that we've accepted a connection, we are no longer listening
-        self.socket_open = False
-        # Check backlog for pending connection requests
-        this_connection = self.backlogged_connections.get()
-        if this_connection is None:
-            return
+    def make_message_packets(self, headers, buffer, number_packets):
+        messages = []
+        for i in range(number_packets): #Construct all the packets we wish to send
+            data = headers[i][0]
+            message = None
+            if i != (number_packets - 1):
+                message = data + buffer[30000*i: 30000*(i+1)]
+            else:
+                message = data + buffer[30000*i:]
+            messages.append(message)
+        return messages
 
-        self.accepted_connection = this_connection[0]
-        sequence_no = randint(0, 1000)
-        ack_no = this_connection[1]
+    def resend_window(self, messages, messages_sent, lowest_unacked):
+        sock.sendto(messages[lowest_unacked], self.address)
+        if lowest_unacked + 1 < len(messages) and messages_sent[lowest_unacked + 1]:
+            sock.sendto(messages[lowest_unacked + 1], self.address)
+        if lowest_unacked + 2 < len(messages) and messages_sent[lowest_unacked + 2]:
+            sock.sendto(messages[lowest_unacked + 2], self.address)
 
-        # Complete connection setup handshake
-        syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, (SYN & ACK), 0, 0, HEADER_SIZE, 0, 0, 0, sequence_no, ack_no, 0, 0)
-        global_socket.sendto(syn_pack, self.accepted_connection)
-
-        # Create new sock352 socket, initialize it, and return it
-        return_socket = socket()
-        return_socket.socket_open = True
-        return_socket.destination_hostname = self.accepted_connection[0]
-        return_socket.destination_port = self.accepted_connection[1]
-        address = (self.accepted_connection[0], self.accepted_connection[1])
-
-        return (return_socket, address)
-
-    # Sends FIN packets to any connection which might be inside of the queue and sets the necessary member variables false.
-    #
-    # @param none
-    # @return none
-    def close(self):   # fill in your code here
-
-        if not global_socket:
-
-            self.socket_open = False
-            self.is_listening = False
-            return
-
-        # Close any open connections
-        if self.socket_open:
-
-            closing_connection = (self.destination_hostname, self.destination_port)
-            fin_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, FIN, 0, 0, HEADER_SIZE, 0, 0, 0, 0, 0, 0, 0)
-            global_socket.sendto(fin_pack, closing_connection)
-
-            self.socket_open = False
-
-        # Reject any pending connection requests
-        while self.backlogged_connections and not self.backlogged_connections.empty():
-
-            closing_connection = self.backlogged_connections.get()[0]
-
-            syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, FIN, 0, 0, HEADER_SIZE, 0, 0, 0, 0, 0, 0, 0)
-            global_socket.sendto(fin_pack, closing_connection)
-
-        return
-
-    # This method we accept a certain amount of bytes from the buffer we are sent and then return that back to the sender
-    # so they know to resend any bytes which we might not have acceptd.
-    #
-    # @param
     def send(self,buffer):
+        #First we must construct the message packets to send
+        buffer_len = len(buffer)
+        number_packets = int(math.ceil(buffer_len/30000.0))
+        headers = self.make_send_headers(number_packets, (buffer_len % 30000))
+        messages = self.make_message_packets(headers, buffer, number_packets)
+        messages_sent = [False] * len(messages)
+        
+        #Now we must start to send the packets we constructed
+        bytes_sent= 0
+        unacked = 0
+        lowest_unacked = 0
+        window_size = 3 
+        for i in range(len(messages)):
+            print "Sending message of size + " + str(len(messages[i]))
+            sock.sendto(messages[i], self.address)
+            messages_sent[i] = True
+            unacked += 1
+            if unacked > window_size or i == len(messages) - 1:
+                while unacked != 0:
+                    try:
+                        sock.settimeout(0.2)
+                        reply_header_bin = sock.recv(40) 
+                        (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(reply_header_bin)
+                        if (ack_no == headers[lowest_unacked][1]):
+                            bytes_sent += 30000 if lowest_unacked < len(messages) - 1 else buffer_len % 30000
+                            lowest_unacked += 1
+                            unacked -= 1
+                        else:
+                            self.resend_window(messages, messages_sent, lowest_unacked)
+                    except syssock.timeout:
+                        self.resend_window(messages, messages_sent,  lowest_unacked)
+                        
+        return bytes_sent
 
-        # We get a byte-stream buffer
-        if not self.socket_open or not global_socket:
-            return
+    def send_ack(self, seq_no, addr):
+        replyHeader = make_header(Flags.ACK, self.sequence_no, seq_no, 20, 40) 
+        sock.sendto(replyHeader, addr)
 
-        new_data_to_send = buffer[:4000]
-
-        self.start_seq_no += 1
-
-        while True:
-
-            data, sender = None, (None, None)
-            sending_packet_type = struct.Struct("!BBBBHHLLQQLL")
-            syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, 0, 0, HEADER_SIZE, 0, 0, 0, self.start_seq_no, 0, 0, len(new_data_to_send))
-
-            # Append buffer data to our byte struct
-            syn_pack += new_data_to_send
-
-            bytessent = global_socket.sendto(syn_pack, (self.destination_hostname, self.destination_port))
-
-            # Data has been sent, now we wait for an ACK
-            try:
-                global_socket.settimeout(1.0)
-                data, sender = global_socket.recvfrom(RECV_SIZE)
-
-                # We know we have received the ACK
-                self.resending_flag = False
-                self.sent_ack_no.append(self.start_seq_no)
-            except syssock.timeout:
-                # We did not get the ACK
-                self.resending_flag = True
-                continue
-            finally:
-                global_socket.settimeout(None)
-
-            unpacked = STRUCT_TYPE.unpack(data)
-            version_num = unpacked[ATTRIBUTES['version']]
-            flag = unpacked[ATTRIBUTES['flags']]
-            ack_no = unpacked[8]
-
-            # check for ACK in recv already
-            self.recv_ack_no.append(ack_no)
-
-            if ack_no == self.start_seq_no:
-                break
-
-        return len(new_data_to_send)
-
-    # The method which we use to handle receiving packets and directing them which come into the underlying UDP socket.
-    #
-    # @param the number of bytes we wish to receive.
-    # @return the bytes which we receive from the UDP socket once striped of the header.
     def recv(self,nbytes):
-
-        resend = False
-
-        if not self.socket_open or not global_socket:
-            return
-
-        data, sender = (None, (None, None))
-
-        try:
-            # This means we got a packet.
-            global_socket.settimeout(TIMEOUT)
-            data, sender = global_socket.recvfrom(RECV_SIZE)
-        except syssock.timeout:
-                # We timed out on getting a packet from the client.
-            return ""
-        finally:
-            global_socket.settimeout(None)
-
-        # Get header from data received and check it to make sure
-        # it is of the proper format
-        header = data[:HEADER_SIZE]
-        syn_pack = STRUCT_TYPE.unpack(header)
-        version_num = syn_pack[ATTRIBUTES['version']]
-        header_len = syn_pack[ATTRIBUTES['header_len']]
-        flag = syn_pack[ATTRIBUTES['flags']]
-        sequence_no = syn_pack[ATTRIBUTES['sequence_no']]
-        payload_len = syn_pack[ATTRIBUTES['payload_len']]
-
-        if sequence_no in self.recv_ack_no:
-            resend = True
-        else:
-            self.recv_ack_no.append(sequence_no)
-
-        data_to_return = data[HEADER_SIZE:]
-
-        ack_no = sequence_no
-
-        syn_pack = STRUCT_TYPE.pack(PROTOCOL_VERSION, ACK, 0, 0, HEADER_SIZE, 0, 0, 0, ack_no, 0, 0, 0)
-
-        # Sending ACK back
-        bytessent = global_socket.sendto(syn_pack, (sender[0], sender[1]))
-
-        self.sent_ack_no.append(ack_no)
-        if resend:
-            return ""
-
-        return data_to_return
+        bytes_rec = 0     # fill in your code here
+        buffer = ""
+        if (self.info_remaining > 0):
+            toRead = min(self.info_remaining, nbytes)
+            buffer += self.internal_buffer[:toRead] 
+            bytes_rec += toRead
+            self.info_remaining -= toRead
+            self.internal_buffer = self.internal_buffer[toRead:]
+        while (bytes_rec < nbytes):
+            (recvBuf, addr) = sock.recvfrom(32768)
+            (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(recvBuf[:40])
+            if (sequence_no > self.expected_sequence_no):
+                continue
+            if (sequence_no < self.expected_sequence_no):
+                self.expected_sequence_no = sequence_no + 1
+                self.send_ack(self.expected_sequence_no, addr)
+                continue
+            if (flags == Flags.FIN):
+                closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 0, 40) 
+                sock.sendto(closeHeader, addr)
+                return None 
+            if not recvBuf:
+                resetHeader = make_header(Flags.reset, self.sequence_no, 0, 0, 40) 
+                sock.sendto(resetHeader, addr)
+                
+            self.expected_sequence_no += 1
+            leftToRead = nbytes - bytes_rec
+            if (leftToRead < payload_len):
+                buffer += recvBuf[40:40+leftToRead]
+                self.info_remaining = payload_len - leftToRead 
+                self.internal_buffer = recvBuf[leftToRead+40:]
+                self.send_ack(self.expected_sequence_no, addr)
+                return buffer
+            buffer += recvBuf[40:]
+            bytes_rec += payload_len
+            self.send_ack(self.expected_sequence_no, addr)
+        return buffer
