@@ -158,7 +158,6 @@ class socket:
         lowest_unacked = 0
         window_size = 3 
         for i in range(len(messages)):
-            print "Sending message of size + " + str(len(messages[i]))
             sock.sendto(messages[i], self.address)
             messages_sent[i] = True
             unacked += 1
@@ -182,9 +181,8 @@ class socket:
     def send_ack(self, seq_no, addr):
         replyHeader = make_header(Flags.ACK, self.sequence_no, seq_no, 20, 40) 
         sock.sendto(replyHeader, addr)
-
     def recv(self,nbytes):
-        bytes_rec = 0     # fill in your code here
+        bytes_rec = 0
         buffer = ""
         if (self.info_remaining > 0):
             toRead = min(self.info_remaining, nbytes)
