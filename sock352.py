@@ -167,6 +167,8 @@ class socket:
                         sock.settimeout(0.2)
                         reply_header_bin = sock.recv(40) 
                         (version, flags, opt_ptr, protocol, header_len, checksum, source_port, dest_port, sequence_no, ack_no, window, payload_len) = unpack_header(reply_header_bin)
+                        if (flags == Flags.FIN):
+                            break
                         if (ack_no == headers[lowest_unacked][1]):
                             bytes_sent += 30000 if lowest_unacked < len(messages) - 1 else buffer_len % 30000
                             lowest_unacked += 1
@@ -196,8 +198,7 @@ class socket:
             if (sequence_no > self.expected_sequence_no):
                 continue
             if (sequence_no < self.expected_sequence_no):
-                self.expected_sequence_no = sequence_no + 1
-                self.send_ack(self.expected_sequence_no, addr)
+                self.send_ack(sequence_no + 1, addr)
                 continue
             if (flags == Flags.FIN):
                 closeHeader = make_header(Flags.FIN, self.sequence_no, self.sequence_no+1, 0, 40) 
